@@ -1,20 +1,22 @@
 <!DOCTYPE html>
 <html>
 <head>
-    <title>Grapple-Bot: Laser Saws</title>
+    <title>Grapple-Bot: Infinite Trials</title>
     <style>
-        body { margin: 0; overflow: hidden; background: #0a0a12; font-family: 'Courier New', monospace; }
+        body { margin: 0; overflow: hidden; background: #05050a; font-family: 'Courier New', monospace; }
         canvas { display: block; }
-        #ui { position: absolute; top: 20px; left: 20px; color: #ff0055; pointer-events: none; }
-        .stat { background: rgba(255, 0, 85, 0.1); padding: 10px; border: 1px solid #ff0055; margin-bottom: 5px; box-shadow: 0 0 10px #ff0055; }
+        #ui { position: absolute; top: 20px; left: 20px; color: #00fff2; pointer-events: none; }
+        .stat { background: rgba(0, 255, 242, 0.1); padding: 10px; border: 1px solid #00fff2; margin-bottom: 5px; box-shadow: 0 0 10px #00fff2; }
+        #level-tag { position: absolute; top: 20px; right: 20px; color: #ff0055; font-size: 24px; font-weight: bold; }
     </style>
 </head>
 <body>
 
 <div id="ui">
-    <div class="stat">DANGER: LASER SAWS ACTIVE</div>
-    <div class="stat">ATTEMPTS: <span id="deaths">0</span></div>
+    <div class="stat">SYSTEM: ACTIVE</div>
+    <div class="stat">FAILURES: <span id="deaths">0</span></div>
 </div>
+<div id="level-tag">SECTOR: <span id="lvl">1</span></div>
 
 <canvas id="game"></canvas>
 
@@ -25,42 +27,71 @@ canvas.width = window.innerWidth;
 canvas.height = window.innerHeight;
 
 let deaths = 0;
+let currentLevel = 1;
 let sawAngle = 0;
+let cameraX = 0;
 
 const player = {
-    x: 100, y: 350, w: 30, h: 30,
+    x: 100, y: 300, w: 30, h: 30,
     vx: 0, vy: 0,
-    speed: 0.6, drag: 0.97, gravity: 0.4,
+    speed: 0.6, drag: 0.98, gravity: 0.45,
     grapplePoint: null, isGrappling: false, length: 0
 };
 
-// Obstacles
-const platforms = [
-    { x: 0, y: 500, w: 300, h: 50 },
-    { x: 600, y: 500, w: 300, h: 50 },
-    { x: 1200, y: 400, w: 400, h: 50 }
-];
+let platforms = [];
+let saws = [];
+let goal = { x: 3000, y: 0, w: 50, h: 1000 };
 
-const saws = [
-    { x: 450, y: 300, radius: 40, speed: 0.05 },
-    { x: 1000, y: 450, radius: 50, speed: -0.08 }
-];
+// --- Level Generator ---
+function buildLevel(lvl) {
+    player.x = 100; player.y = 300; player.vx = 0; player.vy = 0;
+    cameraX = 0;
+    platforms = [
+        { x: 0, y: 500, w: 400, h: 100 }, // Start
+    ];
+    saws = [];
+    
+    // Create a long, hard track
+    const levelLength = 2000 + (lvl * 1000);
+    goal.x = levelLength;
+
+    for (let i = 1; i < levelLength / 400; i++) {
+        // Random Platforms
+        platforms.push({
+            x: i * 450,
+            y: 300 + Math.random() * 250,
+            w: 200 + Math.random() * 200,
+            h: 40
+        });
+        
+        // Harder Saws (More saws as level increases)
+        for (let j = 0; j < lvl; j++) {
+            saws.push({
+                x: i * 450 + (Math.random() * 300),
+                y: 100 + (Math.random() * 400),
+                radius: 30 + (Math.random() * 20),
+                speed: 0.05 + (lvl * 0.01)
+            });
+        }
+    }
+}
 
 const keys = {};
 window.onkeydown = (e) => keys[e.code] = true;
 window.onkeyup = (e) => keys[e.code] = false;
 
 window.onmousedown = (e) => {
-    player.grapplePoint = { x: e.clientX, y: e.clientY };
-    const dx = player.x - player.grapplePoint.x;
-    const dy = player.y - player.grapplePoint.y;
+    // Correct mouse click for camera position
+    player.grapplePoint = { x: e.clientX + cameraX, y: e.clientY };
+    const dx = (player.x + 15) - player.grapplePoint.x;
+    const dy = (player.y + 15) - player.grapplePoint.y;
     player.length = Math.sqrt(dx*dx + dy*dy);
     player.isGrappling = true;
 };
 window.onmouseup = () => player.isGrappling = false;
 
 function reset() {
-    player.x = 100; player.y = 350;
+    player.x = 100; player.y = 300;
     player.vx = 0; player.vy = 0;
     player.isGrappling = false;
     deaths++;
@@ -78,7 +109,6 @@ function update() {
         const dx = (player.x + 15) - player.grapplePoint.x;
         const dy = (player.y + 15) - player.grapplePoint.y;
         const dist = Math.sqrt(dx*dx + dy*dy);
-        
         if (dist > player.length) {
             const angle = Math.atan2(dy, dx);
             player.x = (player.grapplePoint.x + Math.cos(angle) * player.length) - 15;
@@ -91,32 +121,44 @@ function update() {
 
     player.x += player.vx;
     player.y += player.vy;
-    sawAngle += 0.2; // Spin the saws
+    sawAngle += 0.15;
 
-    // Platform Collision
+    // Camera follow
+    cameraX += (player.x - cameraX - canvas.width / 3) * 0.1;
+
+    // Collisions
     platforms.forEach(p => {
         if (player.x < p.x + p.w && player.x + player.w > p.x &&
             player.y < p.y + p.h && player.y + player.h > p.y) {
-            if (player.vy > 0) {
-                player.y = p.y - player.h;
-                player.vy = 0;
-            }
+            if (player.vy > 0) { player.y = p.y - player.h; player.vy = 0; }
         }
     });
 
-    // Saw Collision (Circle vs Square)
     saws.forEach(s => {
         const dx = (player.x + 15) - s.x;
         const dy = (player.y + 15) - s.y;
-        const distance = Math.sqrt(dx * dx + dy * dy);
-        if (distance < s.radius + 10) reset();
+        if (Math.sqrt(dx*dx + dy*dy) < s.radius + 10) reset();
     });
 
-    if (player.y > canvas.height) reset();
+    // Check Win (Goal)
+    if (player.x > goal.x) {
+        currentLevel++;
+        document.getElementById('lvl').innerText = currentLevel;
+        buildLevel(currentLevel);
+    }
+
+    if (player.y > canvas.height + 500) reset();
 }
 
 function draw() {
     ctx.clearRect(0, 0, canvas.width, canvas.height);
+    ctx.save();
+    ctx.translate(-cameraX, 0);
+
+    // Draw Goal Gate
+    ctx.fillStyle = '#00fff2';
+    ctx.shadowBlur = 20;
+    ctx.fillRect(goal.x, 0, 10, canvas.height);
 
     // Draw Saws
     saws.forEach(s => {
@@ -124,43 +166,37 @@ function draw() {
         ctx.translate(s.x, s.y);
         ctx.rotate(sawAngle);
         ctx.fillStyle = '#ff0055';
-        ctx.shadowBlur = 15;
         ctx.shadowColor = '#ff0055';
         for(let i=0; i<8; i++) {
             ctx.rotate(Math.PI/4);
-            ctx.fillRect(0, -s.radius, 10, s.radius*2); // Spikes
+            ctx.fillRect(0, -s.radius, 6, s.radius*2);
         }
-        ctx.beginPath();
-        ctx.arc(0, 0, s.radius/2, 0, Math.PI*2);
-        ctx.fill();
         ctx.restore();
     });
 
     // Draw Rope
     if (player.isGrappling) {
         ctx.strokeStyle = '#00fff2';
-        ctx.setLineDash([5, 5]);
         ctx.beginPath();
         ctx.moveTo(player.x + 15, player.y + 15);
         ctx.lineTo(player.grapplePoint.x, player.grapplePoint.y);
         ctx.stroke();
-        ctx.setLineDash([]);
     }
 
-    // Draw Robot
-    ctx.shadowBlur = 10;
-    ctx.shadowColor = '#00fff2';
+    // Draw Player
     ctx.fillStyle = '#00fff2';
+    ctx.shadowColor = '#00fff2';
     ctx.fillRect(player.x, player.y, player.w, player.h);
-    ctx.fillStyle = '#fff';
-    ctx.fillRect(player.x + 20, player.y + 5, 5, 10); // Eye
 
     // Draw Ground
     ctx.shadowBlur = 0;
-    ctx.fillStyle = '#16213e';
+    ctx.fillStyle = '#111122';
     platforms.forEach(p => ctx.fillRect(p.x, p.y, p.w, p.h));
+
+    ctx.restore();
 }
 
+buildLevel(1);
 function loop() { update(); draw(); requestAnimationFrame(loop); }
 loop();
 </script>
