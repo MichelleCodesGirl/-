@@ -1,7 +1,7 @@
 <!DOCTYPE html>
 <html>
 <head>
-    <title>Grapple-Bot: Sugar & Sound</title>
+    <title>Grapple-Bot: Ghost Protocol</title>
     <style>
         body { margin: 0; overflow: hidden; background: #05050a; font-family: 'Courier New', monospace; transition: background 1s; }
         canvas { display: block; }
@@ -13,38 +13,34 @@
             display: flex; gap: 8px; border-radius: 10px;
         }
         .skin-btn {
-            width: 35px; height: 35px; border: 2px solid #fff; cursor: pointer;
+            width: 40px; height: 40px; border: 2px solid #fff; cursor: pointer;
             display: flex; align-items: center; justify-content: center; font-size: 8px;
-            color: white; opacity: 0.2; pointer-events: none;
+            transition: 0.2s; color: white; opacity: 0.2; pointer-events: none;
         }
         .skin-btn.unlocked { opacity: 1; pointer-events: auto; }
-        .skin-btn.active { border: 3px solid #fff; box-shadow: 0 0 15px #fff; }
-        #overlay {
-            position: fixed; top: 0; left: 0; width: 100%; height: 100%;
-            background: rgba(0,0,0,0.8); display: flex; flex-direction: column;
-            justify-content: center; align-items: center; color: #00fff2; z-index: 100;
-        }
-        button { padding: 20px 40px; font-size: 24px; background: none; border: 2px solid #00fff2; color: #00fff2; cursor: pointer; font-family: inherit; }
+        .skin-btn.active { border: 3px solid #fff; box-shadow: 0 0 15px #fff; transform: scale(1.1); }
+        #level-tag { position: absolute; top: 20px; right: 20px; color: #fff; font-size: 24px; font-weight: bold; text-align: right; }
     </style>
 </head>
 <body>
-
-<div id="overlay">
-    <h1>GRAPPLE-BOT</h1>
-    <p>WORLD: <span id="start-world">NEON CITY</span></p>
-    <button onclick="startGame()">INITIALIZE SYSTEM</button>
-</div>
 
 <div id="ui">
     <div class="stat">UNIT: <span id="skin-name">CYBER-BLUE</span></div>
     <div class="stat">FAILURES: <span id="deaths">0</span></div>
 </div>
 
+<div id="level-tag">
+    <div id="world-name" style="font-size: 14px;">NEON CITY</div>
+    SECTOR: <span id="lvl">1</span>
+</div>
+
 <div id="dashboard">
     <div class="skin-btn unlocked active" id="btn-neon" onclick="selectSkin('neon')" style="background: #00fff2;">NEON</div>
     <div class="skin-btn" id="btn-jungle" onclick="selectSkin('jungle')" style="background: #7cfc00;">GRN</div>
     <div class="skin-btn" id="btn-volcano" onclick="selectSkin('volcano')" style="background: #ff4500;">FIRE</div>
-    <div class="skin-btn" id="btn-donut" onclick="selectSkin('donut')" style="background: #ff69b4;">DNT</div>
+    <div class="skin-btn" id="btn-xmas" onclick="selectSkin('xmas')" style="background: #ff0000;">XMAS</div>
+    <div class="skin-btn" id="btn-ice" onclick="selectSkin('ice')" style="background: #a5f2f3; color:#000;">ICE</div>
+    <div class="skin-btn" id="btn-void" onclick="selectSkin('void')" style="background: #8a2be2;">VOID</div>
 </div>
 
 <canvas id="game"></canvas>
@@ -55,81 +51,102 @@ const ctx = canvas.getContext('2d');
 canvas.width = window.innerWidth;
 canvas.height = window.innerHeight;
 
-let deaths = 0, currentLevel = 1, sawAngle = 0, cameraX = 0, trail = [], gameRunning = false;
+let deaths = 0, currentLevel = 1, sawAngle = 0, cameraX = 0;
+let snow = [], trail = []; // Trail system array
 
 const THEMES = {
     neon: { bg: '#05050a', plat: '#111122', hazard: '#ff0055', accent: '#00fff2', name: 'NEON CITY' },
-    jungle: { bg: '#0a1a0a', plat: '#2d4a22', hazard: '#ffcc00', accent: '#7cfc00', name: 'JUNGLE' },
-    volcano: { bg: '#1a0505', plat: '#4a1111', hazard: '#ff4500', accent: '#ffda00', name: 'VOLCANO' },
-    donut: { bg: '#ffc0cb', plat: '#6f4e37', hazard: '#ff1493', accent: '#ffffff', name: 'DONUT WORLD' }
+    jungle: { bg: '#0a1a0a', plat: '#2d4a22', hazard: '#ffcc00', accent: '#7cfc00', name: 'OVERGROWN JUNGLE' },
+    volcano: { bg: '#1a0505', plat: '#4a1111', hazard: '#ff4500', accent: '#ffda00', name: 'VOLCANIC CORE' },
+    xmas: { bg: '#0b1d36', plat: '#ffffff', hazard: '#2e7d32', accent: '#ff0000', name: 'NORTH POLE' },
+    ice: { bg: '#e0f7fa', plat: '#b2ebf2', hazard: '#006064', accent: '#00bcd4', name: 'ARCTIC TUNDRA' },
+    void: { bg: '#020005', plat: '#1a1a1a', hazard: '#ffffff', accent: '#8a2be2', name: 'THE VOID' }
 };
 
 let currentTheme = THEMES.neon;
 let activeRobotColor = THEMES.neon.accent;
 
-const player = { x: 100, y: 300, w: 30, h: 30, vx: 0, vy: 0, speed: 0.6, drag: 0.98, gravity: 0.45, grapplePoint: null, isGrappling: false, length: 0 };
+const player = {
+    x: 100, y: 300, w: 30, h: 30, vx: 0, vy: 0,
+    speed: 0.6, drag: 0.98, gravity: 0.45,
+    grapplePoint: null, isGrappling: false, length: 0
+};
+
 let platforms = [], saws = [], goal = { x: 3000 };
 
-// --- 8-BIT MUSIC SYNTHESIZER ---
-const audioCtx = new (window.AudioContext || window.webkitAudioContext)();
-function playBeat() {
-    if(!gameRunning) return;
-    const osc = audioCtx.createOscillator();
-    const gain = audioCtx.createGain();
-    osc.type = 'square';
-    osc.frequency.setValueAtTime(110 + (currentLevel * 10), audioCtx.currentTime);
-    gain.gain.setValueAtTime(0.05, audioCtx.currentTime);
-    gain.gain.exponentialRampToValueAtTime(0.0001, audioCtx.currentTime + 0.5);
-    osc.connect(gain); gain.connect(audioCtx.destination);
-    osc.start(); osc.stop(audioCtx.currentTime + 0.5);
-    setTimeout(playBeat, 500);
-}
+for(let i=0; i<60; i++) snow.push({x: Math.random()*canvas.width, y: Math.random()*canvas.height, s: Math.random()*2+1});
 
-function startGame() {
-    document.getElementById('overlay').style.display = 'none';
-    gameRunning = true;
-    audioCtx.resume();
-    playBeat();
-    buildLevel(1);
-    loop();
+function selectSkin(themeKey) {
+    activeRobotColor = THEMES[themeKey].accent;
+    document.getElementById('skin-name').innerText = THEMES[themeKey].name;
+    document.querySelectorAll('.skin-btn').forEach(b => b.classList.remove('active'));
+    document.getElementById('btn-' + themeKey).classList.add('active');
 }
-
-function selectSkin(t) { activeRobotColor = THEMES[t].accent; document.querySelectorAll('.skin-btn').forEach(b => b.classList.remove('active')); document.getElementById('btn-' + t).classList.add('active'); }
 
 function buildLevel(lvl) {
-    if(lvl >= 6) document.getElementById('btn-jungle').classList.add('unlocked');
-    if(lvl >= 11) document.getElementById('btn-volcano').classList.add('unlocked');
-    if(lvl >= 16) document.getElementById('btn-donut').classList.add('unlocked');
+    const keys = Object.keys(THEMES);
+    [6,11,16,21,26].forEach((threshold, i) => {
+        if(lvl >= threshold) document.getElementById('btn-' + keys[i+1]).classList.add('unlocked');
+    });
 
     if (lvl <= 5) currentTheme = THEMES.neon;
     else if (lvl <= 10) currentTheme = THEMES.jungle;
     else if (lvl <= 15) currentTheme = THEMES.volcano;
-    else currentTheme = THEMES.donut;
+    else if (lvl <= 20) currentTheme = THEMES.xmas;
+    else if (lvl <= 25) currentTheme = THEMES.ice;
+    else currentTheme = THEMES.void;
 
+    player.gravity = (currentTheme.name === "THE VOID") ? 0.22 : 0.45;
+    document.getElementById('world-name').innerText = currentTheme.name;
     document.body.style.background = currentTheme.bg;
+
     player.x = 100; player.y = 300; player.vx = 0; player.vy = 0;
-    cameraX = 0; platforms = [{ x: 0, y: 500, w: 400, h: 100 }]; saws = [];
-    const levelLength = 2500 + (lvl * 500); goal.x = levelLength;
+    cameraX = 0; trail = [];
+    platforms = [{ x: 0, y: 500, w: 400, h: 100 }];
+    saws = [];
+    const levelLength = 2500 + (lvl * 600);
+    goal.x = levelLength;
 
     for (let i = 1; i < levelLength / 400; i++) {
-        platforms.push({ x: i * 450, y: 200 + Math.random() * 300, w: 200, h: 40 });
-        saws.push({ x: i * 450 + 200, y: 100 + Math.random() * 300, radius: 25 });
+        platforms.push({ x: i * 450 + (Math.random() * 100), y: 200 + Math.random() * 300, w: 150 + Math.random() * 200, h: 40 });
+        let sawCount = Math.floor(lvl / 4) + 1;
+        for (let j = 0; j < sawCount; j++) {
+            saws.push({ x: i * 450 + (Math.random() * 400), y: 50 + (Math.random() * 400), radius: 20 + (Math.random() * 20) });
+        }
     }
 }
 
+const keysDown = {};
+window.onkeydown = (e) => keysDown[e.code] = true;
+window.onkeyup = (e) => keysDown[e.code] = false;
+
 window.onmousedown = (e) => {
-    if (gameRunning && e.target.tagName === 'CANVAS') {
+    if (e.target.tagName === 'CANVAS') {
         player.grapplePoint = { x: e.clientX + cameraX, y: e.clientY };
-        const dx = (player.x + 15) - player.grapplePoint.x, dy = (player.y + 15) - player.grapplePoint.y;
-        player.length = Math.sqrt(dx*dx + dy*dy); player.isGrappling = true;
+        const dx = (player.x + 15) - player.grapplePoint.x;
+        const dy = (player.y + 15) - player.grapplePoint.y;
+        player.length = Math.sqrt(dx*dx + dy*dy);
+        player.isGrappling = true;
     }
 };
 window.onmouseup = () => player.isGrappling = false;
 
+function reset() {
+    player.x = 100; player.y = 300; player.vx = 0; player.vy = 0;
+    player.isGrappling = false; trail = [];
+    deaths++;
+    document.getElementById('deaths').innerText = deaths;
+}
+
 function update() {
-    player.vy += player.gravity; player.vx *= player.drag;
+    if (keysDown['ArrowRight'] || keysDown['KeyD']) player.vx += player.speed;
+    if (keysDown['ArrowLeft'] || keysDown['KeyA']) player.vx -= player.speed;
+    player.vy += player.gravity;
+    player.vx *= player.drag;
+
     if (player.isGrappling) {
-        const dx = (player.x + 15) - player.grapplePoint.x, dy = (player.y + 15) - player.grapplePoint.y;
+        const dx = (player.x + 15) - player.grapplePoint.x;
+        const dy = (player.y + 15) - player.grapplePoint.y;
         const dist = Math.sqrt(dx*dx + dy*dy);
         if (dist > player.length) {
             const angle = Math.atan2(dy, dx);
@@ -139,37 +156,87 @@ function update() {
             player.vx -= vDotR * (dx / dist); player.vy -= vDotR * (dy / dist);
         }
     }
+
     player.x += player.vx; player.y += player.vy;
+    sawAngle += 0.15;
     cameraX += (player.x - cameraX - canvas.width / 3) * 0.1;
-    trail.push({x: player.x, y: player.y}); if (trail.length > 10) trail.shift();
-    platforms.forEach(p => { if (player.x < p.x + p.w && player.x + player.w > p.x && player.y < p.y + p.h && player.y + player.h > p.y && player.vy > 0) { player.y = p.y - player.h; player.vy = 0; } });
-    saws.forEach(s => { const dx = (player.x + 15) - s.x, dy = (player.y + 15) - s.y; if (Math.sqrt(dx*dx + dy*dy) < s.radius + 10) { deaths++; buildLevel(currentLevel); } });
-    if (player.x > goal.x) { currentLevel++; buildLevel(currentLevel); }
-    if (player.y > canvas.height + 500) { deaths++; buildLevel(currentLevel); }
+
+    // Add current position to trail
+    trail.push({x: player.x, y: player.y, opacity: 0.6});
+    if (trail.length > 10) trail.shift();
+
+    platforms.forEach(p => {
+        if (player.x < p.x + p.w && player.x + player.w > p.x && player.y < p.y + p.h && player.y + player.h > p.y) {
+            if (player.vy > 0) { player.y = p.y - player.h; player.vy = 0; }
+        }
+    });
+
+    saws.forEach(s => {
+        const dx = (player.x + 15) - s.x;
+        const dy = (player.y + 15) - s.y;
+        if (Math.sqrt(dx*dx + dy*dy) < s.radius + 10) reset();
+    });
+
+    if (player.x > goal.x) { currentLevel++; document.getElementById('lvl').innerText = currentLevel; buildLevel(currentLevel); }
+    if (player.y > canvas.height + 600) reset();
+    snow.forEach(s => { s.y += s.s; if(s.y > canvas.height) s.y = -10; });
 }
 
 function draw() {
     ctx.clearRect(0, 0, canvas.width, canvas.height);
-    ctx.save(); ctx.translate(-cameraX, 0);
-    
-    // Draw Sprinkles if in Donut World
-    if(currentTheme.name === "DONUT WORLD") {
-        for(let i=0; i<50; i++) {
-            ctx.fillStyle = i % 2 === 0 ? "yellow" : "cyan";
-            ctx.fillRect(i * 100, (i * 30) % canvas.height, 10, 4);
-        }
+    if(["NORTH POLE", "ARCTIC TUNDRA", "THE VOID"].includes(currentTheme.name)) {
+        ctx.fillStyle = currentTheme.name === "THE VOID" ? "rgba(255,255,255,0.2)" : "white";
+        snow.forEach(s => ctx.fillRect(s.x, s.y, 2, 2));
     }
 
-    trail.forEach((t, i) => { ctx.globalAlpha = i / 20; ctx.fillStyle = activeRobotColor; ctx.fillRect(t.x, t.y, 30, 30); });
-    ctx.globalAlpha = 1;
-    saws.forEach(s => { ctx.fillStyle = currentTheme.hazard; ctx.beginPath(); ctx.arc(s.x, s.y, s.radius, 0, Math.PI*2); ctx.fill(); });
-    if (player.isGrappling) { ctx.strokeStyle = activeRobotColor; ctx.lineWidth = 3; ctx.beginPath(); ctx.moveTo(player.x+15, player.y+15); ctx.lineTo(player.grapplePoint.x, player.grapplePoint.y); ctx.stroke(); }
-    ctx.fillStyle = activeRobotColor; ctx.fillRect(player.x, player.y, 30, 30);
-    platforms.forEach(p => { ctx.fillStyle = currentTheme.plat; ctx.fillRect(p.x, p.y, p.w, p.h); });
+    ctx.save();
+    ctx.translate(-cameraX, 0);
+
+    // Goal
+    ctx.fillStyle = currentTheme.accent;
+    ctx.shadowBlur = 20; ctx.shadowColor = currentTheme.accent;
+    ctx.fillRect(goal.x, 0, 15, canvas.height);
+
+    // Draw Trail (Shadows)
+    trail.forEach((t, i) => {
+        ctx.globalAlpha = i / 20;
+        ctx.fillStyle = activeRobotColor;
+        ctx.fillRect(t.x, t.y, player.w, player.h);
+    });
+    ctx.globalAlpha = 1.0;
+
+    // Saws
+    saws.forEach(s => {
+        ctx.save(); ctx.translate(s.x, s.y); ctx.rotate(sawAngle);
+        ctx.fillStyle = currentTheme.hazard;
+        for(let i=0; i<6; i++) { ctx.rotate(Math.PI/3); ctx.fillRect(-2, -s.radius, 4, s.radius*2); }
+        ctx.restore();
+    });
+
+    // Rope
+    if (player.isGrappling) {
+        ctx.strokeStyle = activeRobotColor; ctx.lineWidth = 3;
+        ctx.beginPath(); ctx.moveTo(player.x+15, player.y+15); ctx.lineTo(player.grapplePoint.x, player.grapplePoint.y); ctx.stroke();
+    }
+
+    // Player
+    ctx.shadowBlur = 10; ctx.shadowColor = activeRobotColor;
+    ctx.fillStyle = activeRobotColor;
+    ctx.fillRect(player.x, player.y, player.w, player.h);
+    ctx.fillStyle = 'white'; ctx.fillRect(player.x+20, player.y+5, 5, 8);
+
+    // Platforms
+    ctx.shadowBlur = 0;
+    platforms.forEach(p => {
+        ctx.fillStyle = currentTheme.plat; ctx.fillRect(p.x, p.y, p.w, p.h);
+        ctx.fillStyle = currentTheme.accent; ctx.fillRect(p.x, p.y, p.w, 4);
+    });
     ctx.restore();
 }
 
+buildLevel(1);
 function loop() { update(); draw(); requestAnimationFrame(loop); }
+loop();
 </script>
 </body>
 </html>
