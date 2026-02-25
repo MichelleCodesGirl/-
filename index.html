@@ -1,0 +1,168 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Grapple-Bot: Laser Saws</title>
+    <style>
+        body { margin: 0; overflow: hidden; background: #0a0a12; font-family: 'Courier New', monospace; }
+        canvas { display: block; }
+        #ui { position: absolute; top: 20px; left: 20px; color: #ff0055; pointer-events: none; }
+        .stat { background: rgba(255, 0, 85, 0.1); padding: 10px; border: 1px solid #ff0055; margin-bottom: 5px; box-shadow: 0 0 10px #ff0055; }
+    </style>
+</head>
+<body>
+
+<div id="ui">
+    <div class="stat">DANGER: LASER SAWS ACTIVE</div>
+    <div class="stat">ATTEMPTS: <span id="deaths">0</span></div>
+</div>
+
+<canvas id="game"></canvas>
+
+<script>
+const canvas = document.getElementById('game');
+const ctx = canvas.getContext('2d');
+canvas.width = window.innerWidth;
+canvas.height = window.innerHeight;
+
+let deaths = 0;
+let sawAngle = 0;
+
+const player = {
+    x: 100, y: 350, w: 30, h: 30,
+    vx: 0, vy: 0,
+    speed: 0.6, drag: 0.97, gravity: 0.4,
+    grapplePoint: null, isGrappling: false, length: 0
+};
+
+// Obstacles
+const platforms = [
+    { x: 0, y: 500, w: 300, h: 50 },
+    { x: 600, y: 500, w: 300, h: 50 },
+    { x: 1200, y: 400, w: 400, h: 50 }
+];
+
+const saws = [
+    { x: 450, y: 300, radius: 40, speed: 0.05 },
+    { x: 1000, y: 450, radius: 50, speed: -0.08 }
+];
+
+const keys = {};
+window.onkeydown = (e) => keys[e.code] = true;
+window.onkeyup = (e) => keys[e.code] = false;
+
+window.onmousedown = (e) => {
+    player.grapplePoint = { x: e.clientX, y: e.clientY };
+    const dx = player.x - player.grapplePoint.x;
+    const dy = player.y - player.grapplePoint.y;
+    player.length = Math.sqrt(dx*dx + dy*dy);
+    player.isGrappling = true;
+};
+window.onmouseup = () => player.isGrappling = false;
+
+function reset() {
+    player.x = 100; player.y = 350;
+    player.vx = 0; player.vy = 0;
+    player.isGrappling = false;
+    deaths++;
+    document.getElementById('deaths').innerText = deaths;
+}
+
+function update() {
+    if (keys['ArrowRight'] || keys['KeyD']) player.vx += player.speed;
+    if (keys['ArrowLeft'] || keys['KeyA']) player.vx -= player.speed;
+    
+    player.vy += player.gravity;
+    player.vx *= player.drag;
+
+    if (player.isGrappling) {
+        const dx = (player.x + 15) - player.grapplePoint.x;
+        const dy = (player.y + 15) - player.grapplePoint.y;
+        const dist = Math.sqrt(dx*dx + dy*dy);
+        
+        if (dist > player.length) {
+            const angle = Math.atan2(dy, dx);
+            player.x = (player.grapplePoint.x + Math.cos(angle) * player.length) - 15;
+            player.y = (player.grapplePoint.y + Math.sin(angle) * player.length) - 15;
+            const vDotR = (player.vx * dx + player.vy * dy) / dist;
+            player.vx -= vDotR * (dx / dist);
+            player.vy -= vDotR * (dy / dist);
+        }
+    }
+
+    player.x += player.vx;
+    player.y += player.vy;
+    sawAngle += 0.2; // Spin the saws
+
+    // Platform Collision
+    platforms.forEach(p => {
+        if (player.x < p.x + p.w && player.x + player.w > p.x &&
+            player.y < p.y + p.h && player.y + player.h > p.y) {
+            if (player.vy > 0) {
+                player.y = p.y - player.h;
+                player.vy = 0;
+            }
+        }
+    });
+
+    // Saw Collision (Circle vs Square)
+    saws.forEach(s => {
+        const dx = (player.x + 15) - s.x;
+        const dy = (player.y + 15) - s.y;
+        const distance = Math.sqrt(dx * dx + dy * dy);
+        if (distance < s.radius + 10) reset();
+    });
+
+    if (player.y > canvas.height) reset();
+}
+
+function draw() {
+    ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+    // Draw Saws
+    saws.forEach(s => {
+        ctx.save();
+        ctx.translate(s.x, s.y);
+        ctx.rotate(sawAngle);
+        ctx.fillStyle = '#ff0055';
+        ctx.shadowBlur = 15;
+        ctx.shadowColor = '#ff0055';
+        for(let i=0; i<8; i++) {
+            ctx.rotate(Math.PI/4);
+            ctx.fillRect(0, -s.radius, 10, s.radius*2); // Spikes
+        }
+        ctx.beginPath();
+        ctx.arc(0, 0, s.radius/2, 0, Math.PI*2);
+        ctx.fill();
+        ctx.restore();
+    });
+
+    // Draw Rope
+    if (player.isGrappling) {
+        ctx.strokeStyle = '#00fff2';
+        ctx.setLineDash([5, 5]);
+        ctx.beginPath();
+        ctx.moveTo(player.x + 15, player.y + 15);
+        ctx.lineTo(player.grapplePoint.x, player.grapplePoint.y);
+        ctx.stroke();
+        ctx.setLineDash([]);
+    }
+
+    // Draw Robot
+    ctx.shadowBlur = 10;
+    ctx.shadowColor = '#00fff2';
+    ctx.fillStyle = '#00fff2';
+    ctx.fillRect(player.x, player.y, player.w, player.h);
+    ctx.fillStyle = '#fff';
+    ctx.fillRect(player.x + 20, player.y + 5, 5, 10); // Eye
+
+    // Draw Ground
+    ctx.shadowBlur = 0;
+    ctx.fillStyle = '#16213e';
+    platforms.forEach(p => ctx.fillRect(p.x, p.y, p.w, p.h));
+}
+
+function loop() { update(); draw(); requestAnimationFrame(loop); }
+loop();
+</script>
+</body>
+</html>
